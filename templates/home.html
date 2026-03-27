@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pose Estimation</title>
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.js"></script>
+    <style>
+        .result-image {
+            display: none;
+            width: 400px;
+            height: auto;
+            border: 2px solid #007bff;
+            border-radius: 10px;
+        }
+        #webcamFeed {
+            width: 640px;
+            height: 480px;
+            border: 3px solid #28a745;
+            border-radius: 10px;
+            display: none;
+            background: #f8f9fa;
+        }
+        .video-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .exercise-info {
+            background: linear-gradient(45deg, #007bff, #28a745);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .count-display {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #28a745;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-6">
+                <h1>Welcome, {{ username }}</h1>
+            </div>
+            <div class="col-6 text-right">
+                {% if profile_picture %}
+                    <img src="data:image/jpeg;base64,{{ profile_picture }}" alt="User Image" class="rounded-circle" style="width: 50px; height: 50px;">
+                {% endif %}
+                <a href="#" class="btn btn-danger ml-2" onclick="logout()">Logout</a>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-2">
+                <button class="btn btn-primary btn-block" onclick="showManual()">📁 Manual</button>
+            </div>
+            <div class="col-2">
+                <button class="btn btn-success btn-block" onclick="showAutomation()">📹 Automation</button>
+            </div>
+        </div>
+        <hr class="my-4">
+    </div>
+
+    <div class="container mt-4">
+        <!-- AUTOMATION SECTION (Manual Upload) -->
+        <div id="automationSection" style="display: none;">
+            <h2 class="text-center text-primary">📁 Upload Images for Pose Estimation</h2>
+            <div class="upload-section mt-4">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card p-3">
+                            <label for="mainImage"><b>Upload Main Image:</b></label>
+                            <input id="mainImage" type="file" name="mainImage" accept="image/*" class="form-control">
+                            <img id="mainImageDisplay" class="result-image mt-2 mx-auto d-block" src="" alt="Main Image">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card p-3">
+                            <label for="comparisonImage"><b>Comparison Image:</b></label>
+                            <input id="comparisonImage" type="file" name="comparisonImage" accept="image/*" class="form-control">
+                            <img id="comparisonImageDisplay" class="result-image mt-2 mx-auto d-block" src="" alt="Comparison Image">
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-4">
+                    <div class="col-12 text-center">
+                        <button class="btn btn-primary btn-lg" onclick="processImages()">🚀 Process Images</button>
+                        <h2 id="result-pose" class="text-center mt-4" style="display:none; font-size: 2.5em;"></h2>
+                    </div>
+                </div>
+            </div>
+            <div class="row mt-4">
+                <div class="col-12">
+                    <h4>📊 Previous Results</h4>
+                    <table class="table table-striped" id="exerciseResultsTable">
+                        <thead>
+                            <tr>
+                                <th>Uploaded Image</th>
+                                <th>Comparison Image</th>
+                                <th>Similarity Score</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- MANUAL SECTION (Live Webcam) -->
+        <div id="manualSection" style="display: none;">
+            <h2 class="text-center text-success">📹 Live Webcam Pose Detection</h2>
+            
+            <!-- Exercise Selection -->
+            <div class="row col-12 text-center mt-4">
+                <div class="col-md-4 mx-auto">
+                    <label for="exerciseSelect" class="form-label h5">Select Exercise:</label>
+                    <select class="form-select form-select-lg" id="exerciseSelect">
+                        <option value="squat">💪 Squat</option>
+                        <option value="push_up">🧘 Push-up</option>
+                        <option value="leg_raise">🦵 Leg Raise</option>
+                        <option value="sit_up">🏋️ Sit-up</option>
+                        <option value="tadasana">🧍 Tadasana</option>
+                        <option value="glute_bridge">🎯 Glute Bridge</option>
+                        <option value="knee_push_up">🥊 Knee Push-up</option>
+                        <option value="t_pose">✈️ T-Pose</option>
+                    </select>
+                </div>
+                <div class="col-md-3 mx-auto mt-3">
+                    <button class="btn btn-success btn-lg" onclick="startWebcam()" id="startBtn">🎥 Start Webcam</button>
+                    <button class="btn btn-danger btn-lg" onclick="stopWebcam()" id="stopBtn" style="display:none;">⏹️ Stop</button>
+                </div>
+            </div>
+
+            <!-- LIVE WEBCAM FEED -->
+            <div class="video-container">
+                <img id="webcamFeed" src="/video_feed" alt="Live Webcam Feed">
+                <div class="exercise-info">
+                    <div>Current Exercise: <span id="currentExercise" style="font-size:1.5em;">Squat</span></div>
+                    <div class="count-display" id="liveCount">Count: 0</div>
+                </div>
+            </div>
+
+            <!-- Results Table -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <h4>📈 Exercise Sessions</h4>
+                    <table class="table table-striped" id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th>Exercise</th>
+                                <th>Exercise Count</th>
+                                <th>Duration</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isWebcamActive = false;
+        let exerciseCount = 0;
+
+        function logout() {
+            fetch('/logout', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => window.location.href = "/")
+            .catch(error => console.error('Logout error:', error));
+        }
+
+        function showManual() {
+            document.getElementById("manualSection").style.display = "block";
+            document.getElementById("automationSection").style.display = "none";
+            updateResultsTable();
+        }
+
+        function showAutomation() {
+            document.getElementById("manualSection").style.display = "none";
+            document.getElementById("automationSection").style.display = "block";
+            updateExerciseAssessment();
+        }
+
+        function processImages() {
+            const mainImageFile = document.getElementById('mainImage').files[0];
+            const comparisonImageFile = document.getElementById('comparisonImage').files[0];
+
+            if (!mainImageFile || !comparisonImageFile) {
+                alert('Please select both images!');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('mainImage', mainImageFile);
+            formData.append('comparisonImage', comparisonImageFile);
+
+            fetch('/process_images', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('mainImageDisplay').src = 'data:image/jpeg;base64,' + data.mainImage;
+                document.getElementById('comparisonImageDisplay').src = 'data:image/jpeg;base64,' + data.comparisonImage;
+                const poseResult = document.getElementById('result-pose');
+                
+                poseResult.textContent = data.similarity_score + "% similar";
+                poseResult.style.display = "block";
+                poseResult.className = data.similarity_score > 75 ? 'text-success' : 'text-danger';
+                
+                document.getElementById('mainImageDisplay').style.display = "block";
+                document.getElementById('comparisonImageDisplay').style.display = "block";
+                updateExerciseAssessment();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Processing failed!');
+            });
+        }
+
+        function startWebcam() {
+            const exercise = document.getElementById('exerciseSelect').value;
+            if (!exercise) {
+                alert('Please select an exercise!');
+                return;
+            }
+
+            // Set exercise globally
+            document.getElementById('currentExercise').textContent = exercise.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+            
+            // Show webcam feed
+            const webcamFeed = document.getElementById('webcamFeed');
+            webcamFeed.style.display = 'block';
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            isWebcamActive = true;
+            exerciseCount = 0;
+            
+            // Notify backend
+            const formData = new FormData();
+            formData.append('exerciseSelect', exercise);
+            fetch('/webcam_access', {
+                method: 'POST',
+                body: formData
+            }).then(() => updateResultsTable());
+        }
+
+        function stopWebcam() {
+            document.getElementById('webcamFeed').style.display = 'none';
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').style.display = 'none';
+            isWebcamActive = false;
+        }
+
+        function updateResultsTable() {
+            fetch('/exercise_count_data')
+            .then(response => response.json())
+            .then(data => {
+                const tableBody = document.querySelector('#resultsTable tbody');
+                tableBody.innerHTML = '';
+                data.forEach(item => {
+                    const row = tableBody.insertRow();
+                    row.innerHTML = `
+                        <td>${item.exercise}</td>
+                        <td><strong>${item.exercise_count}</strong></td>
+                        <td>${item.duration}</td>
+                        <td>${item.start_time}</td>
+                    `;
+                });
+            });
+        }
+
+        function updateExerciseAssessment() {
+            fetch('/exercise_assessment_data')
+            .then(response => response.json())
+            .then(data => {
+                const tableBody = document.querySelector('#exerciseResultsTable tbody');
+                tableBody.innerHTML = '';
+                data.forEach(item => {
+                    const row = tableBody.insertRow();
+                    const img1 = document.createElement('img');
+                    img1.src = "data:image/jpeg;base64," + item.uploaded_image;
+                    img1.style.width = '80px';
+                    img1.style.height = '80px';
+                    
+                    const img2 = document.createElement('img');
+                    img2.src = "data:image/jpeg;base64," + item.comparison_image;
+                    img2.style.width = '80px';
+                    img2.style.height = '80px';
+                    
+                    row.innerHTML = `
+                        <td>${img1.outerHTML}</td>
+                        <td>${img2.outerHTML}</td>
+                        <td><strong>${item.similarity_score}</strong></td>
+                        <td>${item.timestamp}</td>
+                    `;
+                });
+            });
+        }
+
+        // Auto-refresh tables every 5 seconds
+        setInterval(updateResultsTable, 5000);
+        setInterval(updateExerciseAssessment, 5000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <title>Sign Up</title>
+    <style>
+        body {
+            background: linear-gradient(90deg, #1a1a1a, #333);
+            color: #fff;
+        }
+
+        .card {
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: 20px;
+            margin-bottom: 20px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            transform: translateZ(0); /* Add 3D effect */
+            transition: transform 0.3s;
+        }
+
+        .card:hover {
+            transform: scale(1.02) translateZ(0); /* Enlarge and add 3D effect on hover */
+        }
+
+        .card-title {
+            color: #fff;
+        }
+
+        .form-control {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .btn-primary {
+            background-color: #007BFF;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+
+        .alert-danger {
+            background-color: rgba(255, 0, 0, 0.8);
+            color: #fff;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h3 class="card-title text-center">Sign Up</h3>
+                        <form id="signUpForm" onsubmit="validateForm(); return false;">
+                            <div class="form-group">
+                                <label for="username">Username:</label>
+                                <input type="text" class="form-control" id="username" name="username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="password">Password (min. 6 characters):</label>
+                                <input type="password" class="form-control" id="password" name="password" minlength="6"
+                                    required>
+                            </div>
+                            <div class="form-group">
+                                <label for="repassword">Re-enter Password:</label>
+                                <input type="password" class="form-control" id="repassword" name="repassword" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="email">Email:</label>
+                                <input type="email" class="form-control" id="email" name="email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="displayPicture">Display Picture:</label>
+                                <input type="file" class="form-control-file" id="displayPicture" name="displayPicture">
+                            </div>
+                            <div class="form-group">
+                                <button type="submit" class="btn btn-primary">Sign Up</button>
+                            </div>
+                        </form>
+                        <div id="errorMessage" class="alert alert-danger d-none" role="alert"></div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+
+
+<script>
+
+    function displayErrorMessage(message) {
+        const errorMessageDiv = document.getElementById("errorMessage");
+        errorMessageDiv.textContent = message;
+        errorMessageDiv.classList.remove("d-none");
+    }
+
+    function validateForm() {
+        var username = document.getElementById("username").value;
+        var password = document.getElementById("password").value;
+        var repassword = document.getElementById("repassword").value;
+        var email = document.getElementById("email").value;
+        var displayImage = document.getElementById("displayPicture")
+
+       
+        if (password.length < 6) { 
+            displayErrorMessage("Password must be at least 6 characters long");
+            return;
+        }
+
+    
+        if (password !== repassword) {
+            displayErrorMessage("Passwords do not match");
+            return;
+        }
+
+        var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            displayErrorMessage("Invalid email address");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('username', username)
+        formData.append('password', password)
+        formData.append('displayImage', displayImage.files[0])
+        formData.append('email', email)
+        fetch('/save_user_data', {
+            method: "POST",
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            displayErrorMessage(data.message)
+            window.location.href = "/";            
+        })
+        .catch(error => {
+            displayErrorMessage(error)
+            console.log("Error:", error)
+        });
+    }
+</script>
+
+</body>
+</html>

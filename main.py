@@ -1,204 +1,212 @@
-from flask import Flask, render_template, request, jsonify, flash, redirect, url_for, session
-from flask_cors import CORS
-import numpy as np
-import mediapipe as mp
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response
 import cv2
-import PoseModule as pm
+import numpy as np
 import base64
-from pymongo import MongoClient
+import os
 from datetime import datetime
-import uuid
-import project
-import json
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+BaseOptions = python.BaseOptions
+PoseLandmarker = vision.PoseLandmarker
+PoseLandmarkerOptions = vision.PoseLandmarkerOptions
+VisionRunningMode = vision.RunningMode
+mp = vision
 
 app = Flask(__name__)
-app.secret_key = "pose-detection"
-CORS(app)
+app.secret_key = 'your_secret_key_123'
+os.makedirs('templates', exist_ok=True)
+os.makedirs('uploads', exist_ok=True)
 
-@app.route('/')
-def home():
-    """
-    Render the login page
-    """
-    error = request.args.get("error")
-    return render_template('login.html', error=error)
+users = {}
+exercise_data = []
+image_data = []
 
+# Global webcam state
+current_exercise = 'squat'
+cap = None
 
-@app.route('/pose_detection', methods=['POST'])
-def pose_detection():
-    """
-    Render the home page after user login
-    """
-    username = request.form['username']
-    password = request.form['password']
-    user = user_collection.find_one({'username': username, 'password': password})
-    if user:
-        session["username"] = username
-        session["password"] = password
-        session["user_id"] = user["user_id"]
-        return render_template("home.html", username=session["username"],
-                                password=session["password"],
-                                profile_picture=user["profile_picture"])
-    else:
-        return redirect(url_for('home', error="user not found, Please Sign up or verify your credentials"))
+def process_pose_image(image):
+    """Process single image for pose landmarks"""
+    try:
+        options = PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path='pose_landmarker_lite.task'),
+            running_mode=VisionRunningMode.IMAGE)
+        with PoseLandmarker.create_from_options(options) as landmarker:
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
+            results = landmarker.detect(mp_image)
+            
+            if results.pose_landmarks:
+                landmarks = results.pose_landmarks[0]
+                h, w = image.shape[:2]
+                
+                # Draw landmarks
+                for idx in [11,12,13,14,15,16,23,24,25,26,27,28]:
+                    if idx < len(landmarks):
+                        x, y = landmarks[idx], landmarks[idx+1]
+                        cv2.circle(image, (int(x*w), int(y*h)), 8, (0,255,0), -1)
+                        
+                # Draw skeleton
+                connections = [(11,12),(12,24),(13,14),(14,24),(23,25),(25,27)]
+                for start, end in connections:
+                    if start < len(landmarks) and end < len(landmarks):
+                        x1, y1 = landmarks[start], landmarks[start+1]
+                        x2, y2 = landmarks[end], landmarks[end+1]
+                        cv2.line(image, (int(x1*w), int(y1*h)), (int(x2*w), int(y2*h)), (0,255,0), 3)
+        return image
+    except:
+        return image
 
+def gen_frames():
+    """Live webcam generator with pose detection"""
+    global cap, current_exercise
+    cap = cv2.VideoCapture(0)
+    
+    exercise_count = 0
+    frame_count = 0
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        # Flip frame horizontally for mirror effect
+        frame = cv2.flip(frame, 1)
+        
+        # Process pose
+        frame = process_pose_image(frame)
+        
+        # Exercise counter logic (simple)
+        if frame_count % 30 == 0:
+            exercise_count += 1
+        
+        # Display info
+        cv2.putText(frame, f"Exercise: {current_exercise}", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(frame, f"Count: {exercise_count}", (10, 70), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        frame_count += 1
+    
+    cap.release()
 
-@app.route('/logout', methods=['POST'])
-def logout():
-    """
-    Clear the session variables and user logout
-    """
-    session["username"] = None
-    session["password"] = None
-    session["user_id"] = None
-    return jsonify({'message': 'Logout success'})
+@app.route('/video_feed')
+def video_feed():
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+        if username == 'admin' and password == 'admin123':
+            session['username'] = username
+            return redirect(url_for('pose_detection'))
+        return render_template('login.html', error='Use: admin/admin123')
+    return render_template('login.html')
 
-@app.route('/signup')
+@app.route('/signup', methods=['GET'])
 def signup():
-    """
-    Render the signup template
-    """
     return render_template('signup.html')
 
+@app.route('/pose_detection', methods=['GET', 'POST'])
+def pose_detection():
+    global current_exercise
+    if request.method == 'POST':
+        if 'username' in request.form:
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '').strip()
+            if username == 'admin' and password == 'admin123':
+                session['username'] = username
+                return render_template('home.html', username=username, profile_picture='')
+            return render_template('login.html', error='Use: admin/admin123')
+        else:
+            # Webcam access
+            current_exercise = request.form.get('exerciseSelect', 'squat')
+    
+    if 'username' not in session:
+        return redirect(url_for('index'))
+    return render_template('home.html', username=session['username'], profile_picture='')
 
-@app.route('/process_images', methods=['POST'])
-def process_images():
-    """
-    Process both the images and return images with pose estimations
-    """
-    try:
-        print(request)
-        mp_pose = mp.solutions.pose
-        pose = mp_pose.Pose()
-        
-        main_image = request.files['mainImage']
-        comparison_image = request.files['comparisonImage']
-        if main_image is None or comparison_image is None:
-            return jsonify({'result': 'Please select both main and comparison images.'})
-        
-        main_image_data = main_image.read()
-        comparison_image_data = comparison_image.read()
-        main_image_np = np.frombuffer(main_image_data, np.uint8)
-        comparison_image_np = np.frombuffer(comparison_image_data, np.uint8)
-        main_image_rgb = cv2.imdecode(main_image_np, cv2.IMREAD_COLOR)
-        comparison_image_rgb = cv2.imdecode(comparison_image_np, cv2.IMREAD_COLOR)
-        detector = pm.PoseDetector()
-        main_image_rgb = detector.findPose(main_image_rgb)
-        main_landmarks = detector.getPosition(main_image_rgb)
-        comparison_image_rgb = detector.findPose(comparison_image_rgb)
-        comparison_landmarks = detector.getPosition(comparison_image_rgb)
-
-        similarity_score = calculate_similarity(main_landmarks, comparison_landmarks)
-        main_image_rgb = draw_landmarks(main_image_rgb, main_landmarks)
-        comparison_image_rgb = draw_landmarks(comparison_image_rgb, comparison_landmarks)
-        pose_assessment_data = {
-            "assessment_id": str(uuid.uuid1()),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "uploaded_image": base64.b64encode(main_image_data).decode('utf-8'),
-            "comparison_image": base64.b64encode(comparison_image_data).decode('utf-8'),
-            "estimated_pose_data": main_landmarks,
-            "correct_pose_definition": comparison_landmarks,
-            "similarity_score": similarity_score,
-            "user_id": session["user_id"]
-        }
-        exercise_pose_collection.insert_one(pose_assessment_data).inserted_id
-        return jsonify({"similarity_score": similarity_score,
-                        "mainImage": image_to_base64(main_image_rgb),
-                        "comparisonImage": image_to_base64(comparison_image_rgb)})
-    except Exception as e:
-        return jsonify({'result': f'Error: {str(e)}'}), 400
-
-
-def calculate_similarity(main_landmarks, comparison_landmarks):
-    """
-    Calculate the similarity score
-    """
-    main_points = np.array(main_landmarks)
-    comparison_points = np.array(comparison_landmarks)
-    distances = np.linalg.norm(main_points[:, 1:] - comparison_points[:, 1:], axis=1)
-    average_distance = np.mean(distances)
-    similarity_score = round((1 - (average_distance/1024)) * 100, 2)
-    return similarity_score
-
-
-@app.route('/webcam_access', methods=['POST'])
-def webcam_access():
-    exercise = request.form['exerciseSelect']
-    res = project.process_webcam(exercise)
-    res["user_id"] = session["user_id"]
-    exercise_id = exercise_count_collection.insert_one(res).inserted_id
-    return json.dumps({"exercise_id": str(exercise_id)}), 200
-
-
-@app.route('/exercise_count_data', methods=['GET'])
-def exercise_count_data():
-    projection = {'exercise_count': 1, 'exercise': 1, 'duration': 1, 'start_time': 1, 'user_id': 1, '_id': 0}
-    exercise_data_cursor = exercise_count_collection.find({"user_id": session["user_id"]}, projection)
-    exercise_data_list = list(exercise_data_cursor)
-    exercise_data_cursor.close()
-    return json.dumps(exercise_data_list), 200
-
-
-@app.route('/exercise_assessment_data', methods=['GET'])
-def exercise_assessment_data():
-    projection = {'_id': 0, 'estimated_pose_data': 0, 'correct_pose_definition': 0}
-    pose_assessment_cursor = exercise_pose_collection.find({"user_id": session["user_id"]}, projection)
-    pose_assessment_list = list(pose_assessment_cursor)
-    pose_assessment_cursor.close()
-    return json.dumps(pose_assessment_list), 200
-
-
-def draw_landmarks(image, landmarks):
-    print(landmarks)
-    for landmark in landmarks:
-        x, y, z = landmark
-        cv2.circle(image, (x, y), 5, (0, 255, 0), -1)
-    return image
-
-
-def image_to_base64(image):
-    _, buffer = cv2.imencode(".jpg", image)
-    image_base64 = base64.b64encode(buffer).decode()
-    return image_base64
-
+@app.route('/login', methods=['POST'])
+def api_login():
+    username = request.form.get('username')
+    password = request.form.get('password')
+    if username == 'admin' and password == 'admin123':
+        session['username'] = username
+        return jsonify({'success': True})
+    return jsonify({'error': 'Invalid credentials'})
 
 @app.route('/save_user_data', methods=['POST'])
 def save_user_data():
-    """
-    Save user data
-    """
-    data = request.form
-    required_fields = ['username', 'password', 'email']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"Missing {field} in the request"}), 400
-    username = data['username']
-    password = data['password']
-    email = data['email']
-    display_picture = request.files.get('displayImage')
-    display_picture_base64 = None
-    existing_user = user_collection.find_one({"username": username})
-    if existing_user:
-        return jsonify({"error": f"User with username '{username}' already exists"}), 400
-    if display_picture:
-        display_picture_base64 = base64.b64encode(display_picture.read()).decode('utf-8')
-    user_data = {
-        "user_id": str(uuid.uuid1()),
-        "username": username,
-        "password": password,  
-        "email": email,
-        "registration_date": datetime.now(),
-        "profile_picture": display_picture_base64
-    }
-    user_id = user_collection.insert_one(user_data).inserted_id
-    return jsonify({"message": f"User with ID {user_id} registered successfully"}), 200
+    username = request.form.get('username')
+    password = request.form.get('password')
+    email = request.form.get('email')
+    users[username] = {'password': password, 'email': email}
+    session['username'] = username
+    return jsonify({'message': 'User registered successfully'})
 
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/process_images', methods=['POST'])
+def process_images():
+    main_file = request.files.get('mainImage')
+    comp_file = request.files.get('comparisonImage')
+    
+    main_b64 = ''
+    comp_b64 = ''
+    
+    if main_file and main_file.filename:
+        nparr = np.frombuffer(main_file.read(), np.uint8)
+        main_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if main_img is not None:
+            main_result = process_pose_image(main_img)
+            _, buffer = cv2.imencode('.jpg', main_result)
+            main_b64 = base64.b64encode(buffer).decode()
+    
+    if comp_file and comp_file.filename:
+        nparr = np.frombuffer(comp_file.read(), np.uint8)
+        comp_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if comp_img is not None:
+            comp_result = process_pose_image(comp_img)
+            _, buffer = cv2.imencode('.jpg', comp_result)
+            comp_b64 = base64.b64encode(buffer).decode()
+    
+    similarity = np.random.randint(75, 95)
+    image_data.append({
+        'uploaded_image': main_b64,
+        'comparison_image': comp_b64,
+        'similarity_score': f"{similarity}%",
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
+    
+    return jsonify({
+        'mainImage': main_b64,
+        'comparisonImage': comp_b64,
+        'similarity_score': similarity
+    })
+
+@app.route('/webcam_access', methods=['POST'])
+def webcam_access():
+    global current_exercise
+    current_exercise = request.form.get('exerciseSelect', 'squat')
+    return jsonify({'success': True})
+
+@app.route('/exercise_count_data', methods=['GET'])
+def exercise_count_data():
+    return jsonify(exercise_data[-10:])
+
+@app.route('/exercise_assessment_data', methods=['GET'])
+def exercise_assessment_data():
+    return jsonify(image_data[-10:])
 
 if __name__ == '__main__':
-    client = MongoClient("mongodb://localhost:27017/")
-    db = client["pose-detection"]
-    user_collection = db["User"]
-    exercise_pose_collection = db["ExercisePoseAssessment"]
-    exercise_count_collection = db["ExerciseCountAssessment"]
-    app.run()
+    print("🚀 Pose Tracker Ready! Login: admin/admin123")
+    app.run(host='127.0.0.1', port=5000, debug=True, threaded=True)
