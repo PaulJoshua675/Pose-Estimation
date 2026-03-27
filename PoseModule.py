@@ -1,7 +1,6 @@
 import cv2
 import mediapipe as mp
 
-
 class PoseDetector:
 
     def __init__(self, mode = False, upBody = False, smooth=True, detectionCon = 0.5, trackCon = 0.5):
